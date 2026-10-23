@@ -51,3 +51,17 @@ def test_unhandled_403_error(httpx_mock: HTTPXMock, api: Nspd):
     httpx_mock.add_response(status_code=403)
     with pytest.raises(BlockedIP):
         api.safe_request("get", "/api")
+
+
+def test_connect_error_retries_with_backoff(httpx_mock: HTTPXMock, api: Nspd, monkeypatch):
+    delays = []
+    api._retries = 10  # соседние тесты меняют общий session-клиент
+    monkeypatch.setattr("pynspd._sync.api.sleep", delays.append)
+    httpx_mock.add_exception(httpx.ConnectError("connection reset"))
+    httpx_mock.add_exception(httpx.ConnectError("connection reset"))
+    httpx_mock.add_response(status_code=200)
+
+    r = api.safe_request("get", "/api")
+
+    assert r.status_code == 200
+    assert delays == [1.0, 2.0]

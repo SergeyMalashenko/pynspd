@@ -23,6 +23,16 @@ SSL_CONTEXT = ssl._create_unverified_context()
 SSL_CONTEXT.set_ciphers("ALL:@SECLEVEL=1")
 
 
+def retry_backoff_s(attempt: int) -> float:
+    """Пауза перед следующей попыткой: 1, 2, 4, 8, 10, 10… секунд.
+
+    Мгновенные ретраи не пережидают короткие окна нестабильности НСПД
+    (сброс TCP/TLS-соединений на стороне сервера), поэтому для всех
+    транзиентных ошибок применяется нарастающая задержка.
+    """
+    return min(2.0 ** max(attempt, 0), 10.0)
+
+
 def _cache_key_generator(request: Request, body: Optional[bytes]) -> str:
     body = body or b""
     key = generate_key(request, body)

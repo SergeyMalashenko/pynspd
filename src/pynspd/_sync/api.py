@@ -44,6 +44,7 @@ from pynspd.client import (
     NSPD_CACHE_CONTROLLER,
     SSL_CONTEXT,
     BaseNspdClient,
+    retry_backoff_s,
 )
 from pynspd.logger import logger
 from pynspd.map_types.enums import TabTitle, ThemeId
@@ -78,31 +79,38 @@ def retry_on_http_error(func):
                 return func(self, *args, **kwargs)
             except HTTPError as e:
                 last_error = e
-                if isinstance(e, RemoteProtocolError):
-                    logger.debug("%s remote protocol error", logger_suffix)
-                elif isinstance(e, ConnectError):
-                    logger.debug("%s connection error", logger_suffix)
-                elif isinstance(e, TimeoutException):
-                    logger.debug("%s timeout", logger_suffix)
-                    sleep(1)
-                elif isinstance(e, ProxyError):
-                    logger.debug("%s proxy error", logger_suffix)
-                    sleep(1)
+                if isinstance(e, (RemoteProtocolError, ConnectError, TimeoutException, ProxyError)):
+                    delay = retry_backoff_s(attempt)
+                    logger.debug(
+                        "%s %s: %r; backoff %.1fs",
+                        logger_suffix,
+                        type(e).__name__,
+                        e,
+                        delay,
+                    )
+                    sleep(delay)
                 else:
                     logger.exception("%s unexpected exception", logger_suffix)
                     raise e
             except err.PynspdServerError as e:
-                logger.debug("%s unknown server error", logger_suffix)
+                delay = retry_backoff_s(attempt)
+                logger.debug(
+                    "%s server error: %r; backoff %.1fs", logger_suffix, e, delay
+                )
                 last_error = e
+                sleep(delay)
             except err.BlockedIP as e:
                 logger.debug("%s blocked IP, retrying", logger_suffix)
                 last_error = e
                 if not self._retry_on_blocked_ip:
                     raise e
             except err.TooManyRequests as e:
-                logger.debug("%s too many requests", logger_suffix)
+                delay = retry_backoff_s(attempt)
+                logger.debug(
+                    "%s too many requests: %r; backoff %.1fs", logger_suffix, e, delay
+                )
                 last_error = e
-                sleep(1)
+                sleep(delay)
 
     return wrapper
 

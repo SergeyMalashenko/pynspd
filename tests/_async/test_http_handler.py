@@ -57,3 +57,30 @@ async def test_unhandled_403_error(httpx_mock: HTTPXMock, async_api: AsyncNspd):
     httpx_mock.add_response(status_code=403)
     with pytest.raises(BlockedIP):
         await async_api.safe_request("get", "/api")
+
+
+@pytest.mark.asyncio(scope="session")
+async def test_connect_error_retries_with_backoff(
+    httpx_mock: HTTPXMock, async_api: AsyncNspd, monkeypatch
+):
+    delays = []
+
+    async def fake_sleep(delay):
+        delays.append(delay)
+
+    async_api._retries = 10  # соседние тесты меняют общий session-клиент
+    monkeypatch.setattr("pynspd._async.api.sleep", fake_sleep)
+    httpx_mock.add_exception(httpx.ConnectError("connection reset"))
+    httpx_mock.add_exception(httpx.ConnectError("connection reset"))
+    httpx_mock.add_response(status_code=200)
+
+    r = await async_api.safe_request("get", "/api")
+
+    assert r.status_code == 200
+    assert delays == [1.0, 2.0]
+
+
+def test_retry_backoff_progression():
+    from pynspd.client import retry_backoff_s
+
+    assert [retry_backoff_s(i) for i in range(8)] == [1.0, 2.0, 4.0, 8.0, 10.0, 10.0, 10.0, 10.0]
